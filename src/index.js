@@ -4,6 +4,20 @@ const cors = require('cors');
 const helmet = require('helmet');
 const mongoose = require('mongoose');
 
+const app = express();
+
+// ✅ 1) CORS를 가장 위로 (라우트들보다 먼저)
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
+
+app.options('*', cors());
+
 // Routes
 const authRoutes = require('./routes/auth');
 const gmailRoutes = require('./routes/gmail');
@@ -14,18 +28,15 @@ const policyRoutes = require('./routes/policy-analysis');
 const errorHandler = require('./middleware/errorHandler');
 const asyncHandler = require('./middleware/asyncHandler');
 
-const app = express();
-
 // 보안 미들웨어
 app.use(helmet());
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
-  credentials: true
-}));
 
 // 데이터 파싱
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+const securityChatRouter = require("./routes/security-chat");
+app.use("/api/security-chat", securityChatRouter);
 
 // 데이터베이스 연결
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/acc_db')
@@ -57,7 +68,7 @@ app.use((req, res) => {
 // 에러 핸들러
 app.use(errorHandler);
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () => {
   console.log(`🚀 ACC 백엔드 서버 실행 중: http://localhost:${PORT}`);
   console.log(`환경: ${process.env.NODE_ENV || 'development'}`);

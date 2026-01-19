@@ -62,12 +62,11 @@ const categorizeEmail = (subject, fromDomain) => {
 };
 
 // 비활성 기간 계산
-const calculateInactivityDays = (lastActivityDate) => {
+function calculateInactivityDays(lastActivityDate) {
   if (!lastActivityDate) return null;
-  const now = new Date();
-  const diffMs = now - new Date(lastActivityDate);
-  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
-};
+  const ms = Date.now() - new Date(lastActivityDate).getTime();
+  return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24)));
+}
 
 module.exports = {
   extractDomainFromEmail,

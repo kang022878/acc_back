@@ -80,61 +80,100 @@ class GmailService {
    * 발견된 이메일들을 Account로 변환 및 저장
    */
   static async processDiscoveredEmails(userId, emailMetadataArray) {
-    const accounts = [];
-    const domainMap = new Map(); // 중복 제거
+    const domainMap = new Map(); // domain -> aggregate
 
     for (const email of emailMetadataArray) {
-      const domain = 
-        extractDomainFromEmail(email.from) || 
+      const domain =
+        extractDomainFromEmail(email.from) ||
         extractDomainFromUnsubscribe(email.unsubscribeHeader);
-      
-      if (!domain || domainMap.has(domain)) continue;
 
-      const serviceName = extractServiceNameFromSubject(email.subject) || domain;
-      const category = categorizeEmail(email.subject, domain);
+      if (!domain) continue;
 
-      const account = {
-        userId,
-        serviceName,
-        serviceDomain: domain,
-        category,
-        firstSeenDate: new Date(email.date),
-        evidenceTitle: email.subject?.substring(0, 100),
-        evidenceSource: email.from?.split('@')[1] || domain,
-        userConfirmed: false,
-        status: 'active'
-      };
+      const mailDate = new Date(email.date);
+      if (Number.isNaN(mailDate.getTime())) continue;
 
-      domainMap.set(domain, account);
-      accounts.push(account);
+      // 처음 보는 domain이면 초기화
+      if (!domainMap.has(domain)) {
+        const serviceName = extractServiceNameFromSubject(email.subject) || domain;
+        const category = categorizeEmail(email.subject, domain);
+
+        domainMap.set(domain, {
+          userId,
+          serviceName,
+          serviceDomain: domain,
+          category,
+          // ✅ 집계용
+          firstSeenDate: mailDate,
+          lastActivityDate: mailDate,
+          evidenceTitle: email.subject?.substring(0, 100),
+          evidenceSource: email.from?.split("@")[1] || domain,
+          userConfirmed: false,
+          status: "active",
+        });
+        continue;
+      }
+
+      // 이미 있는 domain이면 first/last 갱신
+      const agg = domainMap.get(domain);
+
+      if (mailDate < agg.firstSeenDate) agg.firstSeenDate = mailDate;
+      if (mailDate > agg.lastActivityDate) {
+        agg.lastActivityDate = mailDate;
+        // 최신 메일의 제목/출처를 evidence로 쓰고 싶으면 업데이트
+        agg.evidenceTitle = email.subject?.substring(0, 100);
+        agg.evidenceSource = email.from?.split("@")[1] || domain;
+      }
+
+      // 카테고리는 더 “강한” 분류가 나오면 바꾸고 싶다면 여기서 정책 추가 가능
     }
+
+    const accounts = Array.from(domainMap.values());
 
     // 기존 계정과 병합
     const savedAccounts = [];
     for (const account of accounts) {
       const existing = await Account.findOne({
         userId,
-        serviceDomain: account.serviceDomain
+        serviceDomain: account.serviceDomain,
       });
 
+      // ✅ inactivityDays 계산(메일 기준)
+      const inactivityDays = calculateInactivityDays(account.lastActivityDate);
+
       if (existing) {
-        // 기존 계정 업데이트 (firstSeenDate는 더 오래된 것)
-        existing.firstSeenDate = 
-          existing.firstSeenDate < account.firstSeenDate 
-            ? existing.firstSeenDate 
-            : account.firstSeenDate;
-        existing.lastActivityDate = new Date();
+        // firstSeenDate는 더 오래된 것 유지
+        if (!existing.firstSeenDate || account.firstSeenDate < existing.firstSeenDate) {
+          existing.firstSeenDate = account.firstSeenDate;
+        }
+
+        // lastActivityDate는 더 최신인 것 유지 (절대 new Date()로 덮지 말기!)
+        if (!existing.lastActivityDate || account.lastActivityDate > existing.lastActivityDate) {
+          existing.lastActivityDate = account.lastActivityDate;
+        }
+
+        // 부가 정보 업데이트(원하면)
+        existing.serviceName = existing.serviceName || account.serviceName;
+        existing.category = existing.category || account.category;
+        existing.evidenceTitle = account.evidenceTitle;
+        existing.evidenceSource = account.evidenceSource;
+
+        // ✅ inactivityDays도 갱신
+        existing.inactivityDays = calculateInactivityDays(existing.lastActivityDate);
+
         await existing.save();
         savedAccounts.push(existing);
       } else {
-        // 새 계정 생성
-        const newAccount = await Account.create(account);
+        const newAccount = await Account.create({
+          ...account,
+          inactivityDays,
+        });
         savedAccounts.push(newAccount);
       }
     }
 
     return savedAccounts;
   }
+
 
   /**
    * 기본 Gmail 검색 쿼리 생성
