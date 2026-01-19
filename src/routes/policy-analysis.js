@@ -45,12 +45,24 @@ router.post('/analyze-url', authenticate, asyncHandler(async (req, res) => {
         qaAnswers: savedAnalysis.qaAnswers
       }
     });
-  } catch (error) {
-    console.error('Policy analysis error:', error);
-    res.status(500).json({ error: 'Analysis failed' });
-  }
-}));
+      } catch (error) {
+        console.error('Policy analysis error:', error);
 
+        if (error.code === 'insufficient_quota') {
+          return res.status(402).json({
+            error: 'AI 분석 사용량이 초과되었어요',
+            detail: 'OpenAI API 크레딧이 부족합니다. 잠시 후 다시 시도해주세요.',
+          });
+        }
+
+        res.status(500).json({
+          error: 'Analysis failed',
+          message: error.message,
+        });
+      }
+
+}));
+ 
 /**
  * 텍스트로 약관 분석
  */
