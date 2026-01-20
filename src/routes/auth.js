@@ -17,31 +17,32 @@ function signState(userId) {
 }
 
 router.get('/google/callback', asyncHandler(async (req, res) => {
-  const { code, state } = req.query;
+  const { code } = req.query;
 
-  if (!code) {
-    return res.status(400).json({ error: "Authorization code required" });
-  }
-  if (!state || typeof state !== "string" || !state.includes(".")) {
-    return res.status(400).json({ error: "Invalid state" });
-  }
+  if (!code) return res.status(400).json({ error: "Authorization code required" });
 
-  const [userId, sig] = state.split(".");
-  if (!userId || !sig || sig !== signState(userId)) {
-    return res.status(400).json({ error: "State verification failed" });
-  }
-
-  // code -> tokens 교환
+  // code -> tokens
   const { tokens } = await oauth2Client.getToken(String(code));
   oauth2Client.setCredentials(tokens);
 
-  // 사용자 찾기 (state의 userId 기준)
-  const user = await User.findById(userId);
+  // 사용자 정보 조회
+  const response = await oauth2Client.request({
+    url: 'https://www.googleapis.com/oauth2/v2/userinfo'
+  });
+
+  const { email, name, id: googleId } = response.data;
+  if (!email) return res.status(400).json({ error: "Email not found from Google" });
+
+  // email로 사용자 upsert
+  let user = await User.findOne({ email });
   if (!user) {
-    return res.status(404).json({ error: "User not found for state" });
+    user = new User({ email, name, googleId, privacyConsent: { version: '1.0', emailBodyStorage: false, domainExtractionOnly: true } });
+  } else {
+    user.name = name;
+    user.googleId = googleId;
   }
 
-  // refresh_token은 첫 동의 시에만 오거나, prompt=consent로 강제해야 잘 옴
+  // Gmail tokens 저장 (refresh_token은 있을 때만 갱신)
   const accessToken = tokens.access_token || "";
   const refreshTokenRaw = tokens.refresh_token || "";
   const expiryMs = tokens.expiry_date || tokens.expiry_time || null;
@@ -49,36 +50,29 @@ router.get('/google/callback', asyncHandler(async (req, res) => {
   let refreshToken = refreshTokenRaw;
   let encrypted = false;
 
-  // refreshToken 암호화(필수)
   if (refreshToken && process.env.ENCRYPTION_KEY) {
     refreshToken = encryptToken(refreshToken);
     encrypted = true;
   }
 
   user.gmailTokens = {
-    accessToken, // MVP에서는 저장해도 되지만, 원하면 저장 안 해도 됨(짧게 사라짐)
-    refreshToken, // 암호화된 refresh token
+    accessToken,
+    refreshToken: refreshToken || (user.gmailTokens?.refreshToken ?? ""), // 없으면 기존 유지
     expiresAt: expiryMs ? new Date(expiryMs) : null,
-    encrypted,
+    encrypted: refreshToken ? encrypted : (user.gmailTokens?.encrypted ?? false),
   };
 
   user.lastLoginAt = new Date();
   await user.save();
 
-  // 완료 후 프런트로 리다이렉트(원하는 페이지로)
-  // ✅ JWT 토큰 발급 (프런트가 로그인 상태가 되려면 필요)
+  // ✅ JWT 발급 후 프런트로 token 붙여 redirect
   const jwtToken = generateToken(user._id.toString());
-
-  // 완료 후 프런트로 리다이렉트 (+ token을 query로 전달)
   const base = process.env.POST_AUTH_REDIRECT || "http://localhost:5173/";
   const url = new URL(base);
-
-  // 기존 파라미터가 있든 없든 안전하게 추가됨
-  url.searchParams.set("gmail", "connected");
   url.searchParams.set("token", jwtToken);
+  url.searchParams.set("gmail", "connected");
 
   return res.redirect(url.toString());
-
 }));
 
 /**
