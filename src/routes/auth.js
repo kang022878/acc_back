@@ -81,8 +81,10 @@ router.get('/google/auth-url', asyncHandler(async (req, res) => {
   ];
 
   const authUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: scopes
+    access_type: "offline",
+    scope: scopes,
+    prompt: "consent",                 // 중요: 기존에 동의한 계정도 다시 동의 받기
+    include_granted_scopes: true
   });
 
   res.json({ authUrl });
@@ -174,6 +176,14 @@ router.post('/google/callback', asyncHandler(async (req, res) => {
  * body: { email, name }
  */
 router.post('/dev-login', asyncHandler(async (req, res) => {
+
+  // 🔒 [여기!] dev-login 보호 로직
+  if (process.env.NODE_ENV === "production") {
+    return res.status(403).json({
+      error: "dev-login is disabled in production",
+    });
+  }
+
   const { email, name } = req.body || {};
   if (!email) {
     return res.status(400).json({ error: 'email is required' });
@@ -182,7 +192,6 @@ router.post('/dev-login', asyncHandler(async (req, res) => {
   const normalizedEmail = String(email).toLowerCase().trim();
   const now = new Date();
 
-  // email로 upsert
   const user = await User.findOneAndUpdate(
     { email: normalizedEmail },
     {
