@@ -1,6 +1,5 @@
 // src/routes/security-chat.js
 const express = require("express");
-const { authenticate } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const OpenAI = require("openai");
 
@@ -9,7 +8,6 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 router.post(
   "/",
-  authenticate,
   asyncHandler(async (req, res) => {
     if (!process.env.OPENAI_API_KEY) {
       return res.status(503).json({ error: "OpenAI API key not configured" });
