@@ -66,8 +66,19 @@ router.get('/google/callback', asyncHandler(async (req, res) => {
   await user.save();
 
   // 완료 후 프런트로 리다이렉트(원하는 페이지로)
-  const redirectTo = process.env.POST_AUTH_REDIRECT || "http://localhost:3000/dashboard?gmail=connected";
-  return res.redirect(redirectTo);
+  // ✅ JWT 토큰 발급 (프런트가 로그인 상태가 되려면 필요)
+  const jwtToken = generateToken(user._id.toString());
+
+  // 완료 후 프런트로 리다이렉트 (+ token을 query로 전달)
+  const base = process.env.POST_AUTH_REDIRECT || "http://localhost:5173/";
+  const url = new URL(base);
+
+  // 기존 파라미터가 있든 없든 안전하게 추가됨
+  url.searchParams.set("gmail", "connected");
+  url.searchParams.set("token", jwtToken);
+
+  return res.redirect(url.toString());
+
 }));
 
 /**
