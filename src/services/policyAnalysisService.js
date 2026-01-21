@@ -106,8 +106,7 @@ class PolicyAnalysisService {
   static preprocess(policyText) {
     const text = normalizeText(policyText || "");
     const sentences = extractSentences(text); // 너 utils에 이미 있음
-    const maxSentences = Number(process.env.POLICY_MAX_SENTENCES || 300);
-    return { text, sentences: sentences.slice(0, maxSentences) };
+    return { text, sentences };
   }
 
   // (중요) 태그별 후보 문장 뽑기: "근거 하이라이트" 안정화
@@ -132,8 +131,7 @@ class PolicyAnalysisService {
         if (score > 0) hits.push({ id: i, text: s, score });
       }
       hits.sort((a, b) => b.score - a.score);
-      const maxCandidates = Number(process.env.POLICY_MAX_CANDIDATES || 10);
-      byFlag[flag] = hits.slice(0, maxCandidates); // 후보를 너무 많이 주지 않기
+      byFlag[flag] = hits.slice(0, 30); // 후보를 너무 많이 주지 않기
     }
     return byFlag;
   }
@@ -224,7 +222,7 @@ class PolicyAnalysisService {
     const prompt = this.buildAnalysisPrompt({ serviceName, candidates });
 
     const resp = await openai.responses.create({
-      model: MODEL,
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
       input: [
         { role: "system", content: this.getSystemPrompt() },
         { role: "user", content: prompt },
@@ -238,7 +236,6 @@ class PolicyAnalysisService {
         },
       },
       temperature: 0.2,
-      max_output_tokens: Number(process.env.POLICY_MAX_OUTPUT_TOKENS || 800),
     });
 
     const jsonText = resp.output_text;
